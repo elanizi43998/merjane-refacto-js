@@ -19,38 +19,192 @@ describe('ProductService Tests', () => {
 		({databaseMock, databaseName} = await createDatabaseMock());
 		notificationServiceMock = mockDeep<INotificationService>();
 		productService = new ProductService({
-			ns: notificationServiceMock,
-			db: databaseMock,
+			notificationService: notificationServiceMock,
+			database: databaseMock,
 		});
 	});
 
 	afterEach(async () => cleanUp(databaseName));
+	describe('NORMAL products', () => {
+		it('should decrement stock when available', async () => {
+			// GIVEN
+			const product: Product = {
+				id: 1,
+				leadTime: 15,
+				available: 5,
+				type: 'NORMAL',
+				name: 'USB Cable',
+				expiryDate: null,
+				seasonStartDate: null,
+				seasonEndDate: null,
+			};
+			await databaseMock.insert(products).values(product);
 
-	it('should handle delay notification correctly', async () => {
-		// GIVEN
-		const product: Product = {
-			id: 1,
-			leadTime: 15,
-			available: 0,
-			type: 'NORMAL',
-			name: 'RJ45 Cable',
-			expiryDate: null,
-			seasonStartDate: null,
-			seasonEndDate: null,
-		};
-		await databaseMock.insert(products).values(product);
+			// WHEN
+			await productService.processProductOrder(product);
 
-		// WHEN
-		await productService.notifyDelay(product.leadTime, product);
-
-		// THEN
-		expect(product.available).toBe(0);
-		expect(product.leadTime).toBe(15);
-		expect(notificationServiceMock.sendDelayNotification).toHaveBeenCalledWith(product.leadTime, product.name);
-		const result = await databaseMock.query.products.findFirst({
-			where: (product, {eq}) => eq(product.id, product.id),
+			// THEN
+			const result = await databaseMock.query.products.findFirst({
+				where: (p, {eq}) => eq(p.id, 1),
+			});
+			expect(result!.available).toBe(4);
 		});
-		expect(result).toEqual(product);
+
+      it('should do nothing when out of stock and leadTime = 0', async ()=> {
+          // GIVEN
+          const product: Product = {
+              id: 3,
+              leadTime: 0,
+              available: 0,
+              type: 'NORMAL',
+              name: 'Out of Stock Item',
+              expiryDate: null,
+              seasonStartDate: null,
+              seasonEndDate: null,
+          };
+          await databaseMock.insert(products).values(product);
+
+          // WHEN
+          await productService.processProductOrder(product);
+
+          // THEN
+          expect(notificationServiceMock.sendDelayNotification).not.toHaveBeenCalled();
+          const result = await databaseMock.query.products.findFirst({
+              where: (p, {eq}) => eq(p.id, 3),
+          });
+          expect(result!.available).toBe(0);
+      });
+
+		it('should notify delay when out of stock', async () => {
+			// GIVEN
+			const product: Product = {
+				id: 2,
+				leadTime: 15,
+				available: 0,
+				type: 'NORMAL',
+				name: 'Mac',
+				expiryDate: null,
+				seasonStartDate: null,
+				seasonEndDate: null,
+			};
+			await databaseMock.insert(products).values(product);
+
+			// WHEN
+			await productService.processProductOrder(product);
+
+			// THEN
+			expect(notificationServiceMock.sendDelayNotification).toHaveBeenCalledWith(15, 'Mac');
+		});
+
+	});
+
+	
+
+	describe('SEASONAL products', () => {
+		it('should decrement stock when in season and available', async () => {
+			// GIVEN
+			const currentDate = Date.now();
+			const d = 24 * 60 * 60 * 1000;
+			const product: Product = {
+				id: 3,
+				leadTime: 15,
+				available: 30,
+				type: 'SEASONAL',
+				name: 'Watermelon',
+				expiryDate: null,
+				seasonStartDate: new Date(currentDate - (2 * d)),
+				seasonEndDate: new Date(currentDate + (58 * d)),
+			};
+			await databaseMock.insert(products).values(product);
+
+			// WHEN
+			await productService.processProductOrder(product);
+
+			// THEN
+			const result = await databaseMock.query.products.findFirst({
+				where: (p, {eq}) => eq(p.id, 3),
+			});
+			expect(result!.available).toBe(29);
+		});
+
+		it('should notify out of stock when out of season', async () => {
+			// GIVEN
+			const currentDate = Date.now();
+			const d = 24 * 60 * 60 * 1000;
+			const product: Product = {
+				id: 4,
+				leadTime: 15,
+				available: 30,
+				type: 'SEASONAL',
+				name: 'Grapes',
+				expiryDate: null,
+				seasonStartDate: new Date(currentDate + (180 * d)),
+				seasonEndDate: new Date(currentDate + (240 * d)),
+			};
+			await databaseMock.insert(products).values(product);
+
+			// WHEN
+			await productService.processProductOrder(product);
+
+			// THEN
+			expect(notificationServiceMock.sendOutOfStockNotification).toHaveBeenCalledWith('Grapes');
+		});
+	});
+
+	describe('EXPIRABLE products', () => {
+		it('should decrement stock when not expired and available', async () => {
+			// GIVEN
+			const currentDate = Date.now();
+			const d = 24 * 60 * 60 * 1000;
+			const product: Product = {
+				id: 5,
+				leadTime: 15,
+				available: 30,
+				type: 'EXPIRABLE',
+				name: 'Butter',
+				expiryDate: new Date(currentDate + (26 * d)),
+				seasonStartDate: null,
+				seasonEndDate: null,
+			};
+			await databaseMock.insert(products).values(product);
+
+			// WHEN
+			await productService.processProductOrder(product);
+
+			// THEN
+			const result = await databaseMock.query.products.findFirst({
+				where: (p, {eq}) => eq(p.id, 5),
+			});
+			expect(result!.available).toBe(29);
+		});
+
+		it('should notify expiration when expired', async () => {
+			// GIVEN
+			const currentDate = Date.now();
+			const d = 24 * 60 * 60 * 1000;
+			const expiryDate = new Date(currentDate - (2 * d));
+			const product: Product = {
+				id: 6,
+				leadTime: 90,
+				available: 6,
+				type: 'EXPIRABLE',
+				name: 'Milk',
+				expiryDate,
+				seasonStartDate: null,
+				seasonEndDate: null,
+			};
+			await databaseMock.insert(products).values(product);
+
+			// WHEN
+			await productService.processProductOrder(product);
+
+			// THEN
+			expect(notificationServiceMock.sendExpirationNotification).toHaveBeenCalledWith('Milk', expiryDate);
+			const result = await databaseMock.query.products.findFirst({
+				where: (p, {eq}) => eq(p.id, 6),
+			});
+			expect(result!.available).toBe(0);
+		});
 	});
 });
 
