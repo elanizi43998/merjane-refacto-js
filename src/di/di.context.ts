@@ -10,9 +10,9 @@ declare module '@fastify/awilix' {
 
 	interface Cradle { // eslint-disable-line @typescript-eslint/consistent-type-definitions
 		logger: FastifyBaseLogger;
-		db: Database;
-		ns: INotificationService;
-		ps: ProductService;
+		database: Database;
+		notificationService: INotificationService;
+		productService: ProductService;
 	}
 }
 
@@ -23,13 +23,13 @@ export async function configureDiContext(
 		logger: asValue(server.log),
 	});
 	diContainer.register({
-		db: asValue(server.database),
+		database: asValue(server.database),
 	});
 	diContainer.register({
-		ns: asClass(NotificationService),
+		notificationService: asClass(NotificationService),
 	});
 	diContainer.register({
-		ps: asClass(ProductService),
+		productService: asClass(ProductService),
 	});
 }
 
