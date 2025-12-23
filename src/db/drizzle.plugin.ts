@@ -14,12 +14,14 @@ declare module 'fastify' {
 
 const databaseConfig = CONFIG.get('db');
 const appConfig = CONFIG.get('app');
+
 export const drizzlePlugin: FastifyPluginAsync = fastifyPlugin(
 	async server => {
+		const isAppInProd = appConfig.env === 'PROD';
 		const sqlite = new SqliteDatabase(databaseConfig.url);
 		const database = drizzle(sqlite, {
 			schema,
-			...(appConfig.env === 'PROD' ? {} : {logger: true}),
+			...(!isAppInProd && {logger: true}),
 		});
 
 		// Make Prisma Client available through the fastify server instance: server.prisma
